@@ -3,7 +3,7 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/Error.h"
 
-#include "ATen/cuda/AccumulateType.cuh"
+#include "ATen/AccumulateType.h"
 #include "ATen/cuda/CUDATensorMethods.cuh"
 #include "ATen/cuda/CUDATypeConversion.cuh"
 
@@ -92,7 +92,7 @@ __global__ void embedding_backward_kernel(
   int64_t* input, int64_t* indices, scalar_t* grad_output, scalar_t* grad_weight,
   int64_t* count, int64_t numel, int64_t stride, int padding_idx) {
 
-  using accscalar_t = cuda::acc_type<scalar_t>;
+  using accscalar_t = acc_type<scalar_t, true>;
   int idx = blockIdx.x * 4 + threadIdx.y;
 
   // Each warp is responsible for an input into the LookupTable.
@@ -324,7 +324,7 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
   auto indices_data = device_ptr(indices.data<int64_t>());
 
   // FIXME: thrust::unique only removes consecutive elements that are equal.
-  // We have race conditions when indices contains duplicates which are not
+  // We have race conditions when indices contain duplicates which are not
   // adjacent
   auto unique_indices = indices.type().tensor(indices.numel());
   auto unique_data = device_ptr(unique_indices.data<int64_t>());
@@ -337,7 +337,7 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "embedding_backward", [&] {
     using cuda_scalar_t = cuda::type<scalar_t>;
-    using accscalar_t = cuda::acc_type<cuda_scalar_t>;
+    using accscalar_t = acc_type<cuda_scalar_t, true>;
     renorm_kernel<<<grid, block, 128 * sizeof(accscalar_t), stream>>>(
       self.data<cuda_scalar_t>(),
       unique_indices.data<int64_t>(),

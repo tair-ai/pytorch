@@ -3,7 +3,14 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python.dataio import Reader, ReaderWithLimit, ReaderWithTimeLimit
+from caffe2.python.dataio import (
+    CompositeReader,
+    CompositeReaderBuilder,
+    Reader,
+    ReaderBuilder,
+    ReaderWithLimit,
+    ReaderWithTimeLimit,
+)
 from caffe2.python.dataset import Dataset
 from caffe2.python.pipeline import pipe
 from caffe2.python.schema import Struct, NewRecord, FeedRecord
@@ -11,33 +18,42 @@ from caffe2.python.session import LocalSession
 from caffe2.python.task import TaskGroup, final_output, WorkspaceType
 from caffe2.python.test_util import TestCase
 from caffe2.python.cached_reader import CachedReader
-from caffe2.python import core, workspace
+from caffe2.python import core, workspace, schema
 from caffe2.python.net_builder import ops
 
 import numpy as np
+import numpy.testing as npt
 import os
 import shutil
+import unittest
 import tempfile
 import time
 
 
-def init_dataset(ws, size=100):
-    src_init = core.Net('src_init')
-    with core.NameScope('src'):
-        src_values = Struct(('label', np.array(range(size))))
+def make_source_dataset(ws, size=100, offset=0, name=None):
+    name = name or "src"
+    src_init = core.Net("{}_init".format(name))
+    with core.NameScope(name):
+        src_values = Struct(('label', np.array(range(offset, offset + size))))
         src_blobs = NewRecord(src_init, src_values)
-        src_ds = Dataset(src_blobs)
+        src_ds = Dataset(src_blobs, name=name)
         FeedRecord(src_blobs, src_values, ws)
     ws.run(src_init)
     return src_ds
 
 
-def read_all_data(ws, reader, session):
-    dst_init = core.Net('dst_init')
-    with core.NameScope('dst'):
-        dst_ds = Dataset(reader.schema().clone_schema())
+def make_destination_dataset(ws, schema, name=None):
+    name = name or 'dst'
+    dst_init = core.Net('{}_init'.format(name))
+    with core.NameScope(name):
+        dst_ds = Dataset(schema, name=name)
         dst_ds.init_empty(dst_init)
-    session.run(dst_init)
+    ws.run(dst_init)
+    return dst_ds
+
+
+def read_all_data(ws, reader, session):
+    dst_ds = make_destination_dataset(ws, reader.schema().clone_schema())
 
     with TaskGroup(workspace_type=WorkspaceType.GLOBAL) as tg:
         pipe(reader, dst_ds.writer(), num_runtime_threads=8)
@@ -66,11 +82,106 @@ class ReaderWithDelay(Reader):
         return ([read_net], ) + self.reader.read(read_net)
 
 
+class TestReaderBuilder(ReaderBuilder):
+    def __init__(self, name, size, offset):
+        self._schema = schema.Struct(
+            ('label', schema.Scalar()),
+        )
+        self._name = name
+        self._size = size
+        self._offset = offset
+        self._src_ds = None
+
+    def schema(self):
+        return self._schema
+
+    def setup(self, ws):
+        self._src_ds = make_source_dataset(ws, offset=self._offset, size=self._size,
+                                    name=self._name)
+
+    def new_reader(self, **kwargs):
+        return self._src_ds
+
+
+class TestCompositeReader(TestCase):
+    @unittest.skipIf(os.environ.get('JENKINS_URL'), 'Flaky test on Jenkins')
+    def test_composite_reader(self):
+        ws = workspace.C.Workspace()
+        session = LocalSession(ws)
+        num_srcs = 3
+        names = ["src_{}".format(i) for i in range(num_srcs)]
+        size = 100
+        offsets = [i * size for i in range(num_srcs)]
+        src_dses = [make_source_dataset(ws, offset=offset, size=size, name=name)
+                    for (name, offset) in zip(names, offsets)]
+
+        data = [ws.fetch_blob(str(src.field_blobs[0])) for src in src_dses]
+        # Sanity check we didn't overwrite anything
+        for d, offset in zip(data, offsets):
+            npt.assert_array_equal(d, range(offset, offset + size))
+
+        # Make an identically-sized empty destnation dataset
+        dst_ds_schema = schema.Struct(
+            *[
+                (name, src_ds.content().clone_schema())
+                for name, src_ds in zip(names, src_dses)
+            ]
+        )
+        dst_ds = make_destination_dataset(ws, dst_ds_schema)
+
+        with TaskGroup() as tg:
+            reader = CompositeReader(names,
+                                     [src_ds.reader() for src_ds in src_dses])
+            pipe(reader, dst_ds.writer(), num_runtime_threads=3)
+        session.run(tg)
+
+        for i in range(num_srcs):
+            written_data = sorted(
+                ws.fetch_blob(str(dst_ds.content()[names[i]].label())))
+            npt.assert_array_equal(data[i], written_data, "i: {}".format(i))
+
+    @unittest.skipIf(os.environ.get('JENKINS_URL'), 'Flaky test on Jenkins')
+    def test_composite_reader_builder(self):
+        ws = workspace.C.Workspace()
+        session = LocalSession(ws)
+        num_srcs = 3
+        names = ["src_{}".format(i) for i in range(num_srcs)]
+        size = 100
+        offsets = [i * size for i in range(num_srcs)]
+        src_ds_builders = [
+            TestReaderBuilder(offset=offset, size=size, name=name)
+            for (name, offset) in zip(names, offsets)
+        ]
+
+        # Make an identically-sized empty destnation dataset
+        dst_ds_schema = schema.Struct(
+            *[
+                (name, src_ds_builder.schema())
+                for name, src_ds_builder in zip(names, src_ds_builders)
+            ]
+        )
+        dst_ds = make_destination_dataset(ws, dst_ds_schema)
+
+        with TaskGroup() as tg:
+            reader_builder = CompositeReaderBuilder(
+                names, src_ds_builders)
+            reader_builder.setup(ws=ws)
+            pipe(reader_builder.new_reader(), dst_ds.writer(),
+                 num_runtime_threads=3)
+        session.run(tg)
+
+        for name, offset in zip(names, offsets):
+            written_data = sorted(
+                ws.fetch_blob(str(dst_ds.content()[name].label())))
+            npt.assert_array_equal(range(offset, offset + size), written_data,
+                                   "name: {}".format(name))
+
+
 class TestReaderWithLimit(TestCase):
     def test_runtime_threads(self):
         ws = workspace.C.Workspace()
         session = LocalSession(ws)
-        src_ds = init_dataset(ws)
+        src_ds = make_source_dataset(ws)
         totals = [None] * 3
 
         def proc(rec):
@@ -121,22 +232,18 @@ class TestReaderWithLimit(TestCase):
         ws = workspace.C.Workspace()
         session = LocalSession(ws)
 
-        # Build test dataset
-        src_ds = init_dataset(ws, size=size)
+        # Make source dataset
+        src_ds = make_source_dataset(ws, size=size)
 
-        # Create an identically sized empty destnation dataset
-        dst_init = core.Net('dst_init')
-        with core.NameScope('dst'):
-            dst_ds = Dataset(src_ds.content().clone_schema())
-            dst_ds.init_empty(dst_init)
-        ws.run(dst_init)
+        # Make an identically-sized empty destination Dataset
+        dst_ds = make_destination_dataset(ws, src_ds.content().clone_schema())
 
-        return ws, session, src_ds, dst_init, dst_ds
+        return ws, session, src_ds, dst_ds
 
     def _test_limit_reader_shared(self, reader_class, size, expected_read_len,
                                   expected_finish, num_threads, read_delay,
                                   **limiter_args):
-        ws, session, src_ds, dst_init, dst_ds = \
+        ws, session, src_ds, dst_ds = \
             self._test_limit_reader_init_shared(size)
 
         # Read without limiter
@@ -243,40 +350,41 @@ class TestReaderWithLimit(TestCase):
         session = LocalSession(ws)
 
         def build_source_reader(size):
-            src_ds = init_dataset(ws, size)
+            src_ds = make_source_dataset(ws, size)
             return src_ds.reader()
 
+        # Make a temp file path as cache_path
         with tempfile.NamedTemporaryFile(delete=False) as f:
-            path = f.name
+            cache_path = f.name
             f.close()
-            os.remove(path)
+            os.remove(cache_path)
 
-            # Read data for the first time.
-            cached_reader1 = CachedReader(build_source_reader(100))
-            init_step = cached_reader1.build_cache(path)
-            session.run(init_step)
+        # Read data for the first time.
+        cached_reader1 = CachedReader(build_source_reader(100))
+        init_step = cached_reader1.build_cache(cache_path)
+        session.run(init_step)
 
-            data = read_all_data(ws, cached_reader1, session)
-            self.assertEqual(sorted(data), list(range(100)))
+        data = read_all_data(ws, cached_reader1, session)
+        self.assertEqual(sorted(data), list(range(100)))
 
-            # Read data from cache.
-            workspace.ResetWorkspace()
-            cached_reader2 = CachedReader(build_source_reader(200))
-            init_step = cached_reader2.build_cache(path)
-            session.run(init_step)
+        # Read data from cache.
+        workspace.ResetWorkspace()
+        cached_reader2 = CachedReader(build_source_reader(200))
+        init_step = cached_reader2.build_cache(cache_path)
+        session.run(init_step)
 
-            data = read_all_data(ws, cached_reader2, session)
-            self.assertEqual(sorted(data), list(range(100)))
+        data = read_all_data(ws, cached_reader2, session)
+        self.assertEqual(sorted(data), list(range(100)))
 
-            shutil.rmtree(path)
+        shutil.rmtree(cache_path)
 
-            # We removed cache so we expect to receive data from original reader
-            workspace.ResetWorkspace()
-            cached_reader3 = CachedReader(build_source_reader(300))
-            init_step = cached_reader3.build_cache(path)
-            session.run(init_step)
+        # We removed cache so we expect to receive data from original reader
+        workspace.ResetWorkspace()
+        cached_reader3 = CachedReader(build_source_reader(300))
+        init_step = cached_reader3.build_cache(cache_path)
+        session.run(init_step)
 
-            data = read_all_data(ws, cached_reader3, session)
-            self.assertEqual(sorted(data), list(range(300)))
+        data = read_all_data(ws, cached_reader3, session)
+        self.assertEqual(sorted(data), list(range(300)))
 
-            shutil.rmtree(path)
+        shutil.rmtree(cache_path)

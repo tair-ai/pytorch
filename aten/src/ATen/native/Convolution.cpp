@@ -231,7 +231,7 @@ at::Tensor conv1d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntList stride, IntList padding, IntList dilation, int64_t groups) {
   return at::convolution(input, weight, bias, stride, padding, dilation,
-                         false, {{0}}, groups);
+                         false, {0}, groups);
 }
 
 at::Tensor conv2d(
@@ -287,7 +287,7 @@ static inline std::vector<int64_t> convolution_expand_param_if_needed(
     std::ostringstream ss;
     ss << "expected " << param_name << " to be a single integer value or a "
        << "list of " << expected_dim << " values to match the convolution "
-       << "dimensions, but got " << param_name << "=" << list_param.size();
+       << "dimensions, but got " << param_name << "=" << list_param;
     throw std::runtime_error(ss.str());
   } else {
     return list_param.vec();

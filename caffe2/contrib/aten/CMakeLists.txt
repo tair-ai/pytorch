@@ -1,4 +1,5 @@
 if(USE_ATEN)
+  set(BUILD_ATEN ON)
   if(NOT USE_CUDA)
     set(NO_CUDA ON)
   endif()
@@ -13,7 +14,7 @@ if(USE_ATEN)
   add_custom_command(OUTPUT aten_op.h
   COMMAND
   python ${CMAKE_CURRENT_SOURCE_DIR}/gen_op.py
-  --third_party_root=${PROJECT_SOURCE_DIR}/third_party
+  --aten_root=${PROJECT_SOURCE_DIR}/aten
   --template_dir=${PROJECT_SOURCE_DIR}/caffe2/contrib/aten
   DEPENDS
   ATen
@@ -24,6 +25,6 @@ if(USE_ATEN)
   add_library(aten_op_header_gen INTERFACE)
   add_dependencies(aten_op_header_gen __aten_op_header_gen)
 
-  set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} "${CMAKE_CURRENT_SOURCE_DIR}/aten_op.cc" PARENT_SCOPE)
-  set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} "${CMAKE_CURRENT_SOURCE_DIR}/aten_op_cuda.cc" PARENT_SCOPE)
+  set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${CMAKE_CURRENT_SOURCE_DIR}/aten_op.cc PARENT_SCOPE)
+  set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} ${CMAKE_CURRENT_SOURCE_DIR}/aten_op_cuda.cc PARENT_SCOPE)
 endif()
