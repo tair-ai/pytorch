@@ -476,7 +476,7 @@ cunn_SoftMaxBackward(scalar_t *gradInput, scalar_t *output, scalar_t *gradOutput
 template<template<typename, typename> class Epilogue>
 Tensor host_softmax(const Tensor & input_, const int64_t dim_){
   auto input = input_.contiguous();
-  Tensor output = at::native::empty_like(input);
+  Tensor output = at::empty_like(input);
   if (input.dim() == 0) input = input.view(1);
   int64_t dim = maybe_wrap_dim(dim_, input.dim());
   AT_CHECK(dim >=0 && dim < input.dim(), "dim must be non-negative and less than input dimensions");
@@ -495,7 +495,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_){
     dim3 grid(outer_size);
     dim3 block = SoftMax_getBlockSize(ILP, dim_size);
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "host_softmax", [&] {
-    using cuda_scalar_t = cuda::type<scalar_t>;
+    using cuda_scalar_t = cuda::into_type<scalar_t>;
     using accscalar_t = acc_type<cuda_scalar_t, true>;
     cunn_SoftMaxForward<ILP, cuda_scalar_t, accscalar_t, Epilogue>
       <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
@@ -509,7 +509,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_){
     uint32_t smem_size;
     dim3 grid, block;
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "host_softmax", [&] {
-    using cuda_scalar_t = cuda::type<scalar_t>;
+    using cuda_scalar_t = cuda::into_type<scalar_t>;
     using accscalar_t = acc_type<cuda_scalar_t, true>;
     SpatialSoftMax_getLaunchSizes<accscalar_t>(
         &cunn_SpatialSoftMaxForward<cuda_scalar_t, accscalar_t, Epilogue>,
@@ -529,7 +529,7 @@ template<template<typename, typename> class Epilogue>
 Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t dim_){
   int64_t dim = maybe_wrap_dim(dim_, grad_.dim());
   auto grad = grad_.contiguous();
-  Tensor gI = at::native::empty_like(grad);
+  Tensor gI = at::empty_like(grad);
   if (grad.dim() == 0) grad = grad.view(1);
   AT_CHECK(dim >=0 && dim < grad.dim(), "dim must be non-negative and less than input dimensions");
   auto output = output_.contiguous();
@@ -548,7 +548,7 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
     dim3 grid(outer_size);
     dim3 block = SoftMax_getBlockSize(ILP, dim_size);
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "host_softmax_backward", [&] {
-    using cuda_scalar_t = cuda::type<scalar_t>;
+    using cuda_scalar_t = cuda::into_type<scalar_t>;
     using accscalar_t = acc_type<cuda_scalar_t, true>;
     cunn_SoftMaxBackward<ILP, cuda_scalar_t, accscalar_t, Epilogue>
       <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
@@ -559,7 +559,7 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
     uint32_t smem_size;
     dim3 grid, block;
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "host_softmax_backward", [&] {
-    using cuda_scalar_t = cuda::type<scalar_t>;
+    using cuda_scalar_t = cuda::into_type<scalar_t>;
     using accscalar_t = acc_type<cuda_scalar_t, true>;
     SpatialSoftMax_getLaunchSizes<accscalar_t>(
         &cunn_SpatialSoftMaxBackward<cuda_scalar_t, accscalar_t, Epilogue>,
