@@ -27,6 +27,7 @@ import errno
 
 import torch
 import torch.cuda
+from torch._utils_internal import get_writable_path
 from torch._six import string_classes
 import torch.backends.cudnn
 import torch.backends.mkl
@@ -46,8 +47,8 @@ UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
 
-def run_tests():
-    unittest.main(argv=UNITTEST_ARGS)
+def run_tests(argv=UNITTEST_ARGS):
+    unittest.main(argv=argv)
 
 PY3 = sys.version_info > (3, 0)
 PY34 = sys.version_info >= (3, 4)
@@ -69,6 +70,8 @@ except ImportError:
 
 TEST_MKL = torch.backends.mkl.is_available()
 
+NO_MULTIPROCESSING_SPAWN = 'NO_MULTIPROCESSING_SPAWN' in os.environ
+
 
 def skipIfNoLapack(fn):
     @wraps(fn)
@@ -82,9 +85,22 @@ def skipIfNoLapack(fn):
     return wrapper
 
 
-def skipCUDAMemoryLeakCheck(fn):
-    fn._do_cuda_memory_leak_check = False
-    return fn
+def skipCUDAMemoryLeakCheckIf(condition):
+    def dec(fn):
+        if getattr(fn, '_do_cuda_memory_leak_check', True):  # if current True
+            fn._do_cuda_memory_leak_check = not condition
+        return fn
+    return dec
+
+
+def skipIfNoZeroSize(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if torch._C._use_zero_size_dim():
+            fn(*args, **kwargs)
+        else:
+            raise unittest.SkipTest('Compiled without arbitrary zero size dimension support')
+    return wrapper
 
 
 def get_cuda_memory_usage():
@@ -184,7 +200,8 @@ class TestCase(unittest.TestCase):
         # Wraps the tested method if we should do CUDA memory check.
         test_method = getattr(self, method_name)
         self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
-        if self._do_cuda_memory_leak_check:
+        # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
+        if self._do_cuda_memory_leak_check and not IS_WINDOWS:
             # the import below may initialize CUDA context, so we do it only if
             # self._do_cuda_memory_leak_check is True.
             from common_cuda import TEST_CUDA
@@ -491,7 +508,7 @@ def download_file(url, binary=True):
         from urllib import request, error
 
     filename = os.path.basename(urlsplit(url)[2])
-    data_dir = os.path.join(os.path.dirname(__file__), 'data')
+    data_dir = get_writable_path(os.path.join(os.path.dirname(__file__), 'data'))
     path = os.path.join(data_dir, filename)
 
     if os.path.exists(path):

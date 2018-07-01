@@ -80,6 +80,18 @@ Convolution layers
 .. autoclass:: ConvTranspose3d
     :members:
 
+:hidden:`Fold`
+~~~~~~~~~~~~~~
+
+.. autoclass:: Fold
+    :members:
+
+:hidden:`Unfold`
+~~~~~~~~~~~~~~~
+
+.. autoclass:: Unfold
+    :members:
+
 
 Pooling layers
 ----------------------------------
@@ -381,6 +393,12 @@ Non-linear activations (other)
 ~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: LogSoftmax
+    :members:
+
+:hidden:`AdaptiveLogSoftmaxWithLoss`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: AdaptiveLogSoftmaxWithLoss
     :members:
 
 Normalization layers
@@ -716,6 +734,16 @@ Utilities
 
 .. autofunction:: torch.nn.utils.clip_grad_value_
 
+:hidden:`parameters_to_vector`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.parameters_to_vector
+
+:hidden:`vector_to_parameters`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.vector_to_parameters
+
 :hidden:`weight_norm`
 ~~~~~~~~~~~~~~~~~~~~~
 
@@ -806,6 +834,16 @@ Convolution functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: conv_transpose3d
+
+:hidden:`fold`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: fold
+
+:hidden:`unfold`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: unfold
 
 Pooling functions
 ----------------------------------
