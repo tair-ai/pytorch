@@ -311,12 +311,14 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             reference=swish_gradient,
         )
 
-    @given(X=hu.tensor(dtype=np.float32), inplace=st.booleans(), **hu.gcs)
-    def test_sigmoid(self, X, inplace, gc, dc):
+    @given(X=hu.tensor(dtype=np.float32), inplace=st.booleans(),
+           engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
+    def test_sigmoid(self, X, inplace, engine, gc, dc):
         op = core.CreateOperator(
             "Sigmoid",
             ["X"],
             ["X"] if inplace else ["Y"],
+            engine=engine,
         )
 
         def sigmoid_ref(X):
@@ -448,6 +450,10 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         B = np.random.rand(n, m, k, t).astype(np.float32) + bias
         self._run_single_test(op, ref, A, B, True, test_grad, gc, dc)
 
+        A = np.random.rand(1, m, k, 1).astype(np.float32) + bias
+        B = np.random.rand(n, m, k, t).astype(np.float32) + bias
+        self._run_single_test(op, ref, A, B, True, test_grad, gc, dc)
+
         A = np.random.rand(m, 1, t).astype(np.float32) + bias
         B = np.random.rand(n, m, k, t).astype(np.float32) + bias
         self._run_single_test(op, ref, A, B, True, test_grad, gc, dc)
@@ -569,6 +575,10 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self._run_single_test(op, ref, A, B, True, False, gc, dc)
 
         A = np.random.randint(128, size=(n, m, 1, 1))
+        B = np.random.randint(128, size=(n, m, k, t))
+        self._run_single_test(op, ref, A, B, True, False, gc, dc)
+
+        A = np.random.randint(128, size=(1, m, k, 1))
         B = np.random.randint(128, size=(n, m, k, t))
         self._run_single_test(op, ref, A, B, True, False, gc, dc)
 
